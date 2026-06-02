@@ -29,7 +29,12 @@
     padding: 18px;
     margin: 0 -18px 24px;
     border-bottom: 4px solid #B8956A;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
   }
+  
+  .header-text { min-width: 0; }
   
   .header h1 {
     font-size: 22px;
@@ -41,6 +46,23 @@
     font-size: 12px;
     opacity: 0.7;
     margin-top: 4px;
+  }
+  
+  .logout-link {
+    background: transparent;
+    border: 1px solid rgba(245, 242, 236, 0.3);
+    color: #F5F2EC;
+    font-size: 12px;
+    padding: 6px 12px;
+    border-radius: 6px;
+    cursor: pointer;
+    font-family: inherit;
+    flex-shrink: 0;
+    margin-left: 12px;
+  }
+  
+  .logout-link:hover {
+    background: rgba(245, 242, 236, 0.1);
   }
   
   .section-title {
@@ -253,15 +275,82 @@
     font-size: 14px;
   }
   
+  .login-screen {
+    max-width: 420px;
+    margin: 60px auto 0;
+  }
+  
+  .login-lock-icon {
+    text-align: center;
+    font-size: 48px;
+    margin-bottom: 16px;
+  }
+  
+  .login-title {
+    text-align: center;
+    font-size: 22px;
+    font-weight: 700;
+    color: #1B3A2F;
+    margin-bottom: 6px;
+  }
+  
+  .login-subtitle {
+    text-align: center;
+    font-size: 14px;
+    color: #666;
+    margin-bottom: 24px;
+  }
+  
+  .login-error {
+    background: #FFE0E0;
+    border-left: 4px solid #C0392B;
+    padding: 10px 14px;
+    border-radius: 8px;
+    color: #8B1A1A;
+    margin-bottom: 12px;
+    font-size: 13px;
+  }
+  
   .hidden { display: none !important; }
 </style>
 </head>
 <body>
 
-<div class="wrap">
+<!-- LOGIN SCREEN (shown until password is provided) -->
+<div id="login-screen" class="wrap">
   <div class="header">
-    <h1>Job Tracker — Admin</h1>
-    <div class="biz">Athena Services Co.</div>
+    <div class="header-text">
+      <h1>Job Tracker — Admin</h1>
+      <div class="biz">Athena Services Co.</div>
+    </div>
+  </div>
+  
+  <div class="login-screen">
+    <div class="login-lock-icon">🔒</div>
+    <div class="login-title">Admin Access</div>
+    <div class="login-subtitle">Enter the admin password to continue.</div>
+    
+    <div class="card">
+      <div id="login-error" class="login-error hidden"></div>
+      
+      <div class="form-row">
+        <label for="login-password">Password</label>
+        <input id="login-password" type="password" placeholder="Enter admin password" autocomplete="current-password">
+      </div>
+      
+      <button id="btn-login" class="btn btn-primary">Unlock</button>
+    </div>
+  </div>
+</div>
+
+<!-- MAIN APP (shown after password verified) -->
+<div id="app-screen" class="wrap hidden">
+  <div class="header">
+    <div class="header-text">
+      <h1>Job Tracker — Admin</h1>
+      <div class="biz">Athena Services Co.</div>
+    </div>
+    <button id="btn-logout" class="logout-link">Log out</button>
   </div>
   
   <div id="error-screen" class="hidden">
@@ -338,21 +427,137 @@
 // CONFIG
 // =============================================================
 const WEB_APP_URL = 'https://script.google.com/macros/s/AKfycbyiH5afR0COjEElIWZt1lr5o1TEpQo0R5s0hF90Z2i9ipXfHcfzt-KZeQXC4pHn1wAFcA/exec';
+const STORAGE_KEY = 'athena_admin_pwd';
 
 // =============================================================
 // STATE
 // =============================================================
 let subbies = [];
 let createdJob = null;
+let adminPassword = null;
+
+// =============================================================
+// AUTH
+// =============================================================
+function getStoredPassword() {
+  try {
+    return localStorage.getItem(STORAGE_KEY) || null;
+  } catch (err) {
+    return null;
+  }
+}
+
+function storePassword(pwd) {
+  try {
+    localStorage.setItem(STORAGE_KEY, pwd);
+  } catch (err) {
+    console.warn('Could not save password to localStorage');
+  }
+}
+
+function clearStoredPassword() {
+  try {
+    localStorage.removeItem(STORAGE_KEY);
+  } catch (err) { /* ignore */ }
+}
+
+function showLoginScreen() {
+  document.getElementById('app-screen').classList.add('hidden');
+  document.getElementById('login-screen').classList.remove('hidden');
+  document.getElementById('login-password').value = '';
+  document.getElementById('login-error').classList.add('hidden');
+  setTimeout(() => document.getElementById('login-password').focus(), 100);
+}
+
+function showAppScreen() {
+  document.getElementById('login-screen').classList.add('hidden');
+  document.getElementById('app-screen').classList.remove('hidden');
+}
+
+/**
+ * Tests the supplied password by calling the subbies endpoint.
+ * Returns true if accepted, false otherwise.
+ */
+async function verifyPassword(pwd) {
+  try {
+    const res = await fetch(`${WEB_APP_URL}?action=subbies&pwd=${encodeURIComponent(pwd)}`);
+    const data = await res.json();
+    return !data.error;
+  } catch (err) {
+    return false;
+  }
+}
+
+document.getElementById('btn-login').addEventListener('click', attemptLogin);
+document.getElementById('login-password').addEventListener('keydown', (e) => {
+  if (e.key === 'Enter') attemptLogin();
+});
+
+async function attemptLogin() {
+  const pwd = document.getElementById('login-password').value.trim();
+  const errorEl = document.getElementById('login-error');
+  const btn = document.getElementById('btn-login');
+  
+  if (!pwd) {
+    errorEl.textContent = 'Please enter a password.';
+    errorEl.classList.remove('hidden');
+    return;
+  }
+  
+  btn.disabled = true;
+  btn.textContent = 'Checking...';
+  errorEl.classList.add('hidden');
+  
+  const valid = await verifyPassword(pwd);
+  
+  if (valid) {
+    adminPassword = pwd;
+    storePassword(pwd);
+    showAppScreen();
+    initApp();
+  } else {
+    btn.disabled = false;
+    btn.textContent = 'Unlock';
+    errorEl.textContent = 'Wrong password. Try again.';
+    errorEl.classList.remove('hidden');
+  }
+}
+
+document.getElementById('btn-logout').addEventListener('click', () => {
+  if (!confirm('Log out of admin?')) return;
+  clearStoredPassword();
+  adminPassword = null;
+  showLoginScreen();
+});
 
 // =============================================================
 // INIT
 // =============================================================
-window.addEventListener('DOMContentLoaded', () => {
+window.addEventListener('DOMContentLoaded', async () => {
+  const stored = getStoredPassword();
+  
+  if (stored) {
+    // Try the stored password automatically
+    const valid = await verifyPassword(stored);
+    if (valid) {
+      adminPassword = stored;
+      showAppScreen();
+      initApp();
+      return;
+    } else {
+      // Stored password no longer works (was changed)
+      clearStoredPassword();
+    }
+  }
+  
+  showLoginScreen();
+});
+
+function initApp() {
   loadSubbies();
   loadRecentJobs();
   setDefaultScheduledDate();
-});
+}
 
 function setDefaultScheduledDate() {
   // Default scheduled date = tomorrow
@@ -366,7 +571,7 @@ function setDefaultScheduledDate() {
 // =============================================================
 async function loadSubbies() {
   try {
-    const res = await fetch(`${WEB_APP_URL}?action=subbies`);
+    const res = await fetch(`${WEB_APP_URL}?action=subbies&pwd=${encodeURIComponent(adminPassword)}`);
     const data = await res.json();
     
     if (data.error) {
@@ -397,7 +602,7 @@ function renderSubbieDropdown() {
 // =============================================================
 async function loadRecentJobs() {
   try {
-    const res = await fetch(`${WEB_APP_URL}?action=recent&limit=20`);
+    const res = await fetch(`${WEB_APP_URL}?action=recent&limit=20&pwd=${encodeURIComponent(adminPassword)}`);
     const data = await res.json();
     
     if (data.error) {
@@ -471,6 +676,7 @@ document.getElementById('btn-create').addEventListener('click', async () => {
       headers: { 'Content-Type': 'text/plain;charset=utf-8' },
       body: JSON.stringify({
         action: 'createJob',
+        pwd: adminPassword,
         subbieId: subbieId,
         customerName: customer,
         siteAddress: address,
